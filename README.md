@@ -9,7 +9,7 @@ On Bazzite 45 (`7.3.3-ogc1.1.fc45.x86_64`), an MSI Claw 8 AI+ with the arithmeti
 
 The second patch adds that mode selection to `intel_dp.c`. It matches the Beyond's `BIG:1234` EDID on a single-stream DisplayPort connection and selects 8-bpp DSC during the modeset, subject to the normal link checks. RPM release `3.fc45` includes both patches, so it can select DSC on the first modeset after boot or reconnect. Earlier RPMs need the manual override below.
 
-RPM release `4.fc45` also marks the Beyond's `BIG:5095` EDID as `non-desktop` when the Intel DisplayPort driver detects it. KDE can then offer the connector for a DRM lease to a VR app such as Lobby. Detection runs in the driver at boot and on reconnect, with no helper service. [KDE DRM lease code](https://github.com/KDE/kwin/blob/master/src/wayland/drmlease_v1.cpp#L79-L87)
+RPM release `4.fc45` also marks the Beyond's `BIG:5095` EDID as `non-desktop` when the Intel DisplayPort driver detects it at boot or on reconnect. KDE can then offer the connector for a DRM lease to a VR app such as Lobby. [KDE DRM lease code](https://github.com/KDE/kwin/blob/master/src/wayland/drmlease_v1.cpp#L79-L87)
 
 An earlier Linux 6.16.4-based build (`6.16.4-119.bsb2.fc42.x86_64`) also produced a clear image. That test build used a headset-specific 8-bpp mode-selection quirk and an Intel DSS clock-gating backport. Both arithmetic changes were tested together. [Intel Xe bug report #9247](https://gitlab.freedesktop.org/drm/xe/kernel/-/work_items/9247)
 
@@ -83,8 +83,6 @@ If an earlier `bsb-xe-dsc` RPM is already layered, keep the pinned stock deploym
 ```bash
 sudo rpm-ostree install --uninstall=bsb-xe-dsc --force-replacefiles "$pkg"
 ```
-
-If `lobby-headset-support` is listed in the deployment you are updating, add `--uninstall=lobby-headset-support` to the same command. If you previously enabled `beyond-non-desktop.service`, disable it with `sudo systemctl disable beyond-non-desktop.service` before rebooting.
 
 Verify the staged module and boot image before rebooting for either a first install or an upgrade.
 
