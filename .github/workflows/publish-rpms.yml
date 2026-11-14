@@ -1,0 +1,43 @@
+name: Publish standalone and combined Bazzite Xe RPMs
+on:
+  push:
+    branches: [publish-bazzite-45-7.3.3-ogc1.1-variants]
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Verify and publish the prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          tag=bazzite-45-7.3.3-ogc1.1-variants
+          previous=bazzite-45-7.3.3-ogc1.1
+          cd assets
+          archive=ogc-linux-7.3.3-ogc1.tar.gz
+          curl --fail --location --retry 3 --max-time 240 \
+            --output "$archive" \
+            https://codeload.github.com/OpenGamingCollective/linux/tar.gz/a66e9e735fa99a7844fe18b0af0651737589f61a
+          sha256sum --check SHA256SUMS
+          gh release create "$tag" \
+            'bsb-xe-combined-7.3.3-4.fc45.x86_64.rpm#Combined — all three fixes' \
+            'bsb-xe-dsc-rate-control-7.3.3-2.fc45.x86_64.rpm#Standalone — DSC rate control' \
+            'bsb-xe-automatic-8bpp-dsc-7.3.3-5.fc45.x86_64.rpm#Standalone — automatic 8-bpp DSC' \
+            'bsb-xe-non-desktop-7.3.3-6.fc45.x86_64.rpm#Standalone — non-desktop detection' \
+            SHA256SUMS "$archive" xe-rpm-build-source.tar.gz \
+            --draft --prerelease --verify-tag \
+            --title "Bazzite 45 Xe RPMs — combined and standalone fixes" \
+            --notes-file ../release-notes.md
+          gh release edit "$tag" --draft=false
+          {
+            printf 'See the [new prerelease with a combined RPM and three standalone builds](https://github.com/%s/releases/tag/%s).\n\n' "$GH_REPO" "$tag"
+            gh release view "$previous" --json body --jq .body
+          } > ../previous-notes.md
+          gh release edit "$previous" --notes-file ../previous-notes.md
