@@ -1,6 +1,6 @@
 # Intel Xe DSC fix for Bigscreen Beyond 2
 
-This project provides two patches for the Intel display code shared by Xe and i915. The first corrects two Display Stream Compression (DSC) rate-control calculations in `intel_vdsc.c`.
+This project provides patches for the Intel display code shared by Xe and i915. The rate-control patch corrects two Display Stream Compression (DSC) calculations in `intel_vdsc.c`.
 
 - **RGB quantization parameter table.** Count both half-bit steps per integer bit so 8 compressed bits per pixel selects column 4, the 8-bpp column.
 - **Bits-per-group offset.** Use a positive interval width and signed rounding to the nearest integer so interpolation reaches the correct endpoints.
@@ -9,16 +9,18 @@ On Bazzite 45 (`7.3.3-ogc1.1.fc45.x86_64`), an MSI Claw 8 AI+ with the arithmeti
 
 The second patch adds that mode selection to `intel_dp.c`. It matches the Beyond's `BIG:1234` EDID on a single-stream DisplayPort connection and selects 8-bpp DSC during the modeset, subject to the normal link checks. RPM release `3.fc45` includes both patches, so it can select DSC on the first modeset after boot or reconnect. Earlier RPMs need the manual override below.
 
+RPM release `4.fc45` also marks the Beyond's `BIG:5095` EDID as `non-desktop` when the Intel DisplayPort driver detects it. KDE can then offer the connector for a DRM lease to a VR app such as Lobby. Detection runs in the driver at boot and on reconnect, with no helper service. [KDE DRM lease code](https://github.com/KDE/kwin/blob/master/src/wayland/drmlease_v1.cpp#L79-L87)
+
 An earlier Linux 6.16.4-based build (`6.16.4-119.bsb2.fc42.x86_64`) also produced a clear image. That test build used a headset-specific 8-bpp mode-selection quirk and an Intel DSS clock-gating backport. Both arithmetic changes were tested together. [Intel Xe bug report #9247](https://gitlab.freedesktop.org/drm/xe/kernel/-/work_items/9247)
 
 ## Apply the patches to kernel source
 
-From the root of a kernel source tree, point `git apply` at both patches in this repository. They apply to OGC tag `v7.3.3-ogc1` at commit `a66e9e735fa99a7844fe18b0af0651737589f61a`. [OGC source](https://github.com/OpenGamingCollective/linux/tree/a66e9e735fa99a7844fe18b0af0651737589f61a)
+From the root of a kernel source tree, point `git apply` at the patches in this repository. They apply to OGC tag `v7.3.3-ogc1` at commit `a66e9e735fa99a7844fe18b0af0651737589f61a`. [OGC source](https://github.com/OpenGamingCollective/linux/tree/a66e9e735fa99a7844fe18b0af0651737589f61a)
 
 ```bash
 repo=/path/to/intel-xe-dsc-fix
-git apply --check "$repo/intel-xe-dsc-rc.patch" "$repo/beyond-fixed-dsc.patch" &&
-  git apply "$repo/intel-xe-dsc-rc.patch" "$repo/beyond-fixed-dsc.patch"
+patches=("$repo/intel-xe-dsc-rc.patch" "$repo/beyond-fixed-dsc.patch" "$repo/beyond-non-desktop.patch")
+git apply --check "${patches[@]}" && git apply "${patches[@]}"
 ```
 
 ## Build an Xe-only test RPM on Bazzite 45
@@ -44,8 +46,9 @@ tar -xzf "$build/ogc-linux.tar.gz" --strip-components=1 \
   -C "$build/kbuild" --wildcards '*/drivers/gpu/drm/*'
 
 cd "$build/kbuild"
-git apply --check "$repo/intel-xe-dsc-rc.patch" "$repo/beyond-fixed-dsc.patch"
-git apply "$repo/intel-xe-dsc-rc.patch" "$repo/beyond-fixed-dsc.patch"
+patches=("$repo/intel-xe-dsc-rc.patch" "$repo/beyond-fixed-dsc.patch" "$repo/beyond-non-desktop.patch")
+git apply --check "${patches[@]}"
+git apply "${patches[@]}"
 make -j"$(nproc)" M=drivers/gpu/drm/xe modules
 objcopy --strip-debug drivers/gpu/drm/xe/xe.ko "$build/xe.ko"
 
@@ -58,7 +61,7 @@ diff -u <(modinfo -F alias "$stock" | sort) <(modinfo -F alias "$build/xe.ko" | 
 
 rpmbuild -bb --define "_topdir $build/rpmbuild" \
   --define "module_path $build/xe.ko" "$repo/packaging/bsb-xe-dsc.spec"
-pkg="$build/rpmbuild/RPMS/x86_64/bsb-xe-dsc-7.3.3-3.fc45.x86_64.rpm"
+pkg="$build/rpmbuild/RPMS/x86_64/bsb-xe-dsc-7.3.3-4.fc45.x86_64.rpm"
 rpm -K --nosignature "$pkg"
 printf 'Test RPM: %s\n' "$pkg"
 ```
@@ -81,6 +84,8 @@ If an earlier `bsb-xe-dsc` RPM is already layered, keep the pinned stock deploym
 sudo rpm-ostree install --uninstall=bsb-xe-dsc --force-replacefiles "$pkg"
 ```
 
+If `lobby-headset-support` is listed in the deployment you are updating, add `--uninstall=lobby-headset-support` to the same command. If you previously enabled `beyond-non-desktop.service`, disable it with `sudo systemctl disable beyond-non-desktop.service` before rebooting.
+
 Verify the staged module and boot image before rebooting for either a first install or an upgrade.
 
 ```bash
@@ -101,9 +106,11 @@ printf '\n'
 readelf -n "$(modinfo -n xe)" | grep 'Build ID:'
 ```
 
-## Check automatic 8-bpp DSC
+## Check headset detection and automatic DSC
 
-After rebooting into RPM release `3.fc45`, connect the headset and start the VR app. With the headset displaying the 90 Hz scene, check both eyes and read the Intel display state.
+After rebooting into RPM release `4.fc45`, connect the headset and start the VR app. For `BIG:5095`, verify that Lobby can acquire a DRM lease. If `drm_info` is available, check that the headset's DisplayPort connector has `non-desktop=1`.
+
+For `BIG:1234`, start a 90 Hz scene, check both eyes, and read the Intel display state.
 
 ```bash
 sudo cat /sys/kernel/debug/dri/0000:00:02.0/i915_display_info
