@@ -1,0 +1,48 @@
+diff --git a/drivers/gpu/drm/i915/display/intel_dp.c b/drivers/gpu/drm/i915/display/intel_dp.c
+index 3152122..e1e039f 100644
+--- a/drivers/gpu/drm/i915/display/intel_dp.c
++++ b/drivers/gpu/drm/i915/display/intel_dp.c
+@@ -2566,6 +2566,17 @@ intel_dp_get_connector_max_link_config(struct intel_connector *connector,
+ 						 max_link_config);
+ }
+ 
++static bool intel_dp_needs_beyond_fixed_dsc(const struct intel_connector *connector)
++{
++	static const struct drm_edid_ident beyond = {
++		.panel_id = drm_edid_encode_panel_id('B', 'I', 'G', 0x1234),
++	};
++
++	/* The Beyond advertises an 8-bpp DSC pass-through timing. */
++	return connector->base.connector_type == DRM_MODE_CONNECTOR_DisplayPort &&
++		!connector->mst.dp && drm_edid_match(connector->detect_edid, &beyond);
++}
++
+ /*
+  * Calculate the output link min, max bpp values in limits based on the pipe bpp
+  * range, crtc_state and dsc mode. Return true on success.
+@@ -2608,6 +2619,17 @@ intel_dp_compute_config_link_bpp_limits(struct intel_connector *connector,
+ 						       crtc_state->output_format,
+ 						       limits->pipe.max_bpp,
+ 						       max_link_bpp_x16);
++
++		if (intel_dp_needs_beyond_fixed_dsc(connector)) {
++			const int fixed_bpp_x16 = fxp_q4_from_int(8);
++
++			if (fixed_bpp_x16 < limits->link.min_bpp_x16 ||
++			    fixed_bpp_x16 > max_link_bpp_x16)
++				return false;
++
++			limits->link.min_bpp_x16 = fixed_bpp_x16;
++			max_link_bpp_x16 = fixed_bpp_x16;
++		}
+ 	}
+ 
+ 	limits->link.max_bpp_x16 = max_link_bpp_x16;
+@@ -2837,6 +2859,7 @@ intel_dp_compute_link_for_joined_pipes(struct intel_encoder *encoder,
+ 	joiner_needs_dsc = intel_dp_joiner_needs_dsc(display, num_joined_pipes);
+ 
+ 	dsc_needed = joiner_needs_dsc || intel_dp->force_dsc_en ||
++		     intel_dp_needs_beyond_fixed_dsc(connector) ||
+ 		     !intel_dp_compute_config_limits(intel_dp, conn_state, pipe_config,
+ 						     respect_downstream_limits,
+ 						     false,

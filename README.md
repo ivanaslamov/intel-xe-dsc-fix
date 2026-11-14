@@ -1,21 +1,24 @@
 # Intel Xe DSC fix for Bigscreen Beyond 2
 
-This patch corrects two Display Stream Compression (DSC) rate-control calculations in `intel_vdsc.c`, which Intel Xe and i915 share.
+This project provides two patches for the Intel display code shared by Xe and i915. The first corrects two Display Stream Compression (DSC) rate-control calculations in `intel_vdsc.c`.
 
 - **RGB quantization parameter table.** Count both half-bit steps per integer bit so 8 compressed bits per pixel selects column 4, the 8-bpp column.
 - **Bits-per-group offset.** Use a positive interval width and signed rounding to the nearest integer so interpolation reaches the correct endpoints.
 
-On Bazzite 45 (`7.3.3-ogc1.1.fc45.x86_64`), an MSI Claw 8 AI+ with the patched Xe module still showed colored static on the Bigscreen Beyond 2e while the headset link ran with DSC disabled. With the same module loaded, [forcing DSC and capping the link at 8 bpp](#enable-8-bpp-dsc-for-the-headset) produced a clear image in both eyes at 3840×1920, 90 Hz. The driver reported 8.0000 compressed bpp, 8 bits per color component, and four DSC slices.
+On Bazzite 45 (`7.3.3-ogc1.1.fc45.x86_64`), an MSI Claw 8 AI+ with the arithmetic fixes still showed colored static on the Bigscreen Beyond 2e while the headset link ran with DSC disabled. With the same module loaded, [forcing DSC and capping the link at 8 bpp](#manually-enable-8-bpp-dsc-for-the-headset) produced a clear image in both eyes at 3840×1920, 90 Hz. The driver reported 8.0000 compressed bpp, 8 bits per color component, and four DSC slices.
+
+The second patch adds that mode selection to `intel_dp.c`. It matches the Beyond's `BIG:1234` EDID on a single-stream DisplayPort connection and selects 8-bpp DSC during the modeset, subject to the normal link checks. RPM release `3.fc45` includes both patches, so it can select DSC on the first modeset after boot or reconnect. Earlier RPMs need the manual override below.
 
 An earlier Linux 6.16.4-based build (`6.16.4-119.bsb2.fc42.x86_64`) also produced a clear image. That test build used a headset-specific 8-bpp mode-selection quirk and an Intel DSS clock-gating backport. Both arithmetic changes were tested together. [Intel Xe bug report #9247](https://gitlab.freedesktop.org/drm/xe/kernel/-/work_items/9247)
 
-## Apply the patch to kernel source
+## Apply the patches to kernel source
 
-From the root of a kernel source tree, point `git apply` at the patch in this repository. The patch applies to OGC tag `v7.3.3-ogc1` at commit `a66e9e735fa99a7844fe18b0af0651737589f61a`. [OGC source](https://github.com/OpenGamingCollective/linux/tree/a66e9e735fa99a7844fe18b0af0651737589f61a)
+From the root of a kernel source tree, point `git apply` at both patches in this repository. They apply to OGC tag `v7.3.3-ogc1` at commit `a66e9e735fa99a7844fe18b0af0651737589f61a`. [OGC source](https://github.com/OpenGamingCollective/linux/tree/a66e9e735fa99a7844fe18b0af0651737589f61a)
 
 ```bash
-git apply --check /path/to/intel-xe-dsc-fix/intel-xe-dsc-rc.patch &&
-  git apply /path/to/intel-xe-dsc-fix/intel-xe-dsc-rc.patch
+repo=/path/to/intel-xe-dsc-fix
+git apply --check "$repo/intel-xe-dsc-rc.patch" "$repo/beyond-fixed-dsc.patch" &&
+  git apply "$repo/intel-xe-dsc-rc.patch" "$repo/beyond-fixed-dsc.patch"
 ```
 
 ## Build an Xe-only test RPM on Bazzite 45
@@ -41,8 +44,8 @@ tar -xzf "$build/ogc-linux.tar.gz" --strip-components=1 \
   -C "$build/kbuild" --wildcards '*/drivers/gpu/drm/*'
 
 cd "$build/kbuild"
-git apply --check "$repo/intel-xe-dsc-rc.patch"
-git apply "$repo/intel-xe-dsc-rc.patch"
+git apply --check "$repo/intel-xe-dsc-rc.patch" "$repo/beyond-fixed-dsc.patch"
+git apply "$repo/intel-xe-dsc-rc.patch" "$repo/beyond-fixed-dsc.patch"
 make -j"$(nproc)" M=drivers/gpu/drm/xe modules
 objcopy --strip-debug drivers/gpu/drm/xe/xe.ko "$build/xe.ko"
 
@@ -55,22 +58,32 @@ diff -u <(modinfo -F alias "$stock" | sort) <(modinfo -F alias "$build/xe.ko" | 
 
 rpmbuild -bb --define "_topdir $build/rpmbuild" \
   --define "module_path $build/xe.ko" "$repo/packaging/bsb-xe-dsc.spec"
-pkg="$build/rpmbuild/RPMS/x86_64/bsb-xe-dsc-7.3.3-2.fc45.x86_64.rpm"
+pkg="$build/rpmbuild/RPMS/x86_64/bsb-xe-dsc-7.3.3-3.fc45.x86_64.rpm"
 rpm -K --nosignature "$pkg"
 printf 'Test RPM: %s\n' "$pkg"
 ```
 
 ## Stage and verify the test deployment
 
-Check `rpm-ostree status` before staging. These steps require `jq` and assume the stock deployment is booted, there is no other pending deployment, and local initramfs regeneration is disabled. The build produces an unsigned module. Use a trusted module signature if the system enforces signatures. The RPM is tied to the exact kernel package version. [rpm-ostree file overrides and initramfs](https://coreos.github.io/rpm-ostree/administrator-handbook/#override-rpm-files)
+Check `rpm-ostree status` before staging. These steps require `jq` and assume there is no other pending deployment. The build produces an unsigned module. Use a trusted module signature if the system enforces signatures. The RPM is tied to the exact kernel package version. [rpm-ostree file overrides and initramfs](https://coreos.github.io/rpm-ostree/administrator-handbook/#override-rpm-files)
 
-Keep using the Bash session from the build section so `$pkg`, `$kver` and `$build` are available. Save your work before rebooting.
+Keep using the Bash session from the build section so `$pkg`, `$kver` and `$build` are available. For a first install from stock with local initramfs regeneration disabled, run the following.
 
 ```bash
 sudo ostree admin pin booted
 sudo rpm-ostree install --force-replacefiles "$pkg"
 sudo rpm-ostree initramfs --enable --arg=--add-drivers --arg=xe --arg=--nostrip
+```
 
+If an earlier `bsb-xe-dsc` RPM is already layered, keep the pinned stock deployment and replace the earlier RPM in one transaction. Keep the existing local initramfs settings from the earlier install.
+
+```bash
+sudo rpm-ostree install --uninstall=bsb-xe-dsc --force-replacefiles "$pkg"
+```
+
+Verify the staged module and boot image before rebooting for either a first install or an upgrade.
+
+```bash
 staged=$(rpm-ostree status --json | jq -er \
   '.deployments[] | select(.staged) | "/sysroot/ostree/deploy/\(.osname)/deploy/\(.checksum).\(.serial)"')
 xe="usr/lib/modules/$kver/kernel/drivers/gpu/drm/xe/xe.ko"
@@ -88,7 +101,21 @@ printf '\n'
 readelf -n "$(modinfo -n xe)" | grep 'Build ID:'
 ```
 
-## Enable 8-bpp DSC for the headset
+## Check automatic 8-bpp DSC
+
+After rebooting into RPM release `3.fc45`, connect the headset and start the VR app. With the headset displaying the 90 Hz scene, check both eyes and read the Intel display state.
+
+```bash
+sudo cat /sys/kernel/debug/dri/0000:00:02.0/i915_display_info
+```
+
+Look for `compressed-bpp:8.0000` in the active 3840×1920, 90 Hz display pipeline whose encoder lists the headset's DisplayPort connector. The Claw's internal `eDP-1` panel can also report 8-bpp DSC. The connector check in the next section identifies the headset's port.
+
+<a id="enable-8-bpp-dsc-for-the-headset"></a>
+
+## Manually enable 8-bpp DSC for the headset
+
+Use these steps with the earlier arithmetic-only RPM or to diagnose a link configuration problem.
 
 Connect and power the headset. The tested Beyond 2e has EDID vendor `BIG`, product `0x1234` (`09 27 34 12` in the command below). The following command lists its connected DisplayPort connector. Use the name it prints in the next block. [Intel link-bpp control](https://github.com/OpenGamingCollective/linux/blob/v7.3.3-ogc1/drivers/gpu/drm/i915/display/intel_link_bw.c)
 
@@ -137,4 +164,4 @@ If either pre-reboot comparison fails, use `sudo rpm-ostree cleanup -p` to disca
 
 ## License
 
-The patch follows the MIT license of `intel_vdsc.c`. The [license file](LICENSE) preserves the upstream Intel copyright notice. The Xe module built from the kernel tree is subject to that tree's applicable licenses. [Linux kernel licensing rules](https://docs.kernel.org/process/license-rules.html)
+The patches follow the MIT licenses of `intel_vdsc.c` and `intel_dp.c`. The [license file](LICENSE) preserves the upstream Intel copyright notices. The Xe module built from the kernel tree is subject to that tree's applicable licenses. [Linux kernel licensing rules](https://docs.kernel.org/process/license-rules.html)
