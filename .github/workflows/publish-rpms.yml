@@ -1,0 +1,33 @@
+name: Publish Bazzite 45 Xe RPMs
+on:
+  push:
+    branches: [publish-bazzite-45-7.3.3-ogc1.1]
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Verify and publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          tag=bazzite-45-7.3.3-ogc1.1
+          cd assets
+          sha256sum --check SHA256SUMS
+          archive=ogc-linux-7.3.3-ogc1.tar.gz
+          curl --fail --location --retry 3 --max-time 240 \
+            --output "$archive" \
+            https://codeload.github.com/OpenGamingCollective/linux/tar.gz/a66e9e735fa99a7844fe18b0af0651737589f61a
+          echo "8cadd5a5633be81982c48c9d8c8ca6ede034b322c018b99a66e5c0166aed3ce8  $archive" | sha256sum --check
+          sha256sum "$archive" xe-rpm-build-source.tar.gz >> SHA256SUMS
+          gh release create "$tag" ./*.rpm SHA256SUMS "$archive" xe-rpm-build-source.tar.gz \
+            --draft --prerelease --verify-tag \
+            --title "Bazzite 45 Xe RPMs for Linux 7.3.3-ogc1.1" \
+            --notes-file ../release-notes.md
+          gh release edit "$tag" --draft=false
