@@ -7,15 +7,25 @@ This project provides patches for the Intel display code shared by Xe and i915. 
 
 On Bazzite 45 (`7.3.3-ogc1.1.fc45.x86_64`), an MSI Claw 8 AI+ with the arithmetic fixes still showed colored static on the Bigscreen Beyond 2e while the headset link ran with DSC disabled. With the same module loaded, [forcing DSC and capping the link at 8 bpp](#manually-enable-8-bpp-dsc-for-the-headset) produced a clear image in both eyes at 3840×1920, 90 Hz. The driver reported 8.0000 compressed bpp, 8 bits per color component, and four DSC slices.
 
-The second patch adds that mode selection to `intel_dp.c`. It matches the Beyond's `BIG:1234` EDID on a single-stream DisplayPort connection and selects 8-bpp DSC during the modeset, subject to the normal link checks. RPM release `3.fc45` includes both patches, so it can select DSC on the first modeset after boot or reconnect. Earlier RPMs need the manual override below.
+The automatic DSC patch adds that mode selection to `intel_dp.c`. It matches the Beyond's `BIG:1234` EDID on a single-stream DisplayPort connection and selects 8-bpp DSC during the modeset, subject to the normal link checks.
 
-RPM release `4.fc45` also marks the Beyond's `BIG:5095` EDID as `non-desktop` when the Intel DisplayPort driver detects it at boot or on reconnect. KDE can then offer the connector for a DRM lease to a VR app such as Lobby. [KDE DRM lease code](https://github.com/KDE/kwin/blob/master/src/wayland/drmlease_v1.cpp#L79-L87)
+The non-desktop patch marks the Beyond's `BIG:5095` EDID as `non-desktop` when the Intel DisplayPort driver detects it at boot or on reconnect. KDE can then offer the connector for a DRM lease to a VR app such as Lobby. [KDE DRM lease code](https://github.com/KDE/kwin/blob/master/src/wayland/drmlease_v1.cpp#L79-L87)
 
 An earlier Linux 6.16.4-based build (`6.16.4-119.bsb2.fc42.x86_64`) also produced a clear image. That test build used a headset-specific 8-bpp mode-selection quirk and an Intel DSS clock-gating backport. Both arithmetic changes were tested together. [Intel Xe bug report #9247](https://gitlab.freedesktop.org/drm/xe/kernel/-/work_items/9247)
 
+## Choose a Bazzite RPM
+
+Choose the **combined** RPM (`4.fc45`) to try all three fixes on Bazzite 45 kernel `7.3.3-ogc1.1.fc45.x86_64`. Each standalone RPM applies one patch to the stock Xe module, which lets you test that change independently. All four RPMs replace the same `xe.ko` and use the package name `bsb-xe-dsc`. Install one at a time. Choose by patch name. [Download the RPMs](https://github.com/ivanaslamov/intel-xe-dsc-fix/releases/tag/bazzite-45-7.3.3-ogc1.1-variants)
+
+| Standalone RPM | Patch | What it changes |
+| --- | --- | --- |
+| DSC rate control (`2.fc45`) | [`intel-xe-dsc-rc.patch`](intel-xe-dsc-rc.patch) | Corrects DSC rate-control arithmetic. For `BIG:1234`, use the [manual 8-bpp DSC override](#manually-enable-8-bpp-dsc-for-the-headset). |
+| Automatic 8-bpp DSC (`5.fc45`) | [`beyond-fixed-dsc.patch`](beyond-fixed-dsc.patch) | Selects 8-bpp DSC for `BIG:1234` using the stock kernel's rate-control arithmetic. |
+| Non-desktop detection (`6.fc45`) | [`beyond-non-desktop.patch`](beyond-non-desktop.patch) | Enables headset detection for DRM leasing on `BIG:5095` using the stock kernel's DSC behavior. |
+
 ## Apply the patches to kernel source
 
-From the root of a kernel source tree, point `git apply` at the patches in this repository. They apply to OGC tag `v7.3.3-ogc1` at commit `a66e9e735fa99a7844fe18b0af0651737589f61a`. [OGC source](https://github.com/OpenGamingCollective/linux/tree/a66e9e735fa99a7844fe18b0af0651737589f61a)
+From the root of a kernel source tree, point `git apply` at the patches in this repository. Apply one patch to test an individual change, or use the commands below for the combined build. The patches apply to OGC tag `v7.3.3-ogc1` at commit `a66e9e735fa99a7844fe18b0af0651737589f61a`. [OGC source](https://github.com/OpenGamingCollective/linux/tree/a66e9e735fa99a7844fe18b0af0651737589f61a)
 
 ```bash
 repo=/path/to/intel-xe-dsc-fix
@@ -23,54 +33,30 @@ patches=("$repo/intel-xe-dsc-rc.patch" "$repo/beyond-fixed-dsc.patch" "$repo/bey
 git apply --check "${patches[@]}" && git apply "${patches[@]}"
 ```
 
-## Build an Xe-only test RPM on Bazzite 45
+## Build the Xe-only RPMs on Bazzite 45
 
-Run these commands in Bash from the root of this repository on a machine booted into `7.3.3-ogc1.1.fc45.x86_64`. You need the matching `kernel-devel` package, the kernel's build toolchain, and `curl`, `git`, `tar`, `make`, `binutils`, and `rpmbuild`. The module is built against the running kernel's configuration and exported symbols. [Kernel build documentation](https://docs.kernel.org/kbuild/modules.html)
+Run these commands from the root of this repository on x86_64 Fedora or Bazzite. Use the matching `kernel-devel-7.3.3-ogc1.1.fc45.x86_64` build tree, GCC 16.2.1, binutils 2.47, Git, Make, `modinfo`, and `rpm-build`. The script verifies the source archive and builds each variant from a fresh copy of the same kernel source and headers. [OGC kernel packages](https://github.com/OpenGamingCollective/kernel-packages/pkgs/container/kernel-packages-fedora)
 
 ```bash
-set -euo pipefail
-repo=$PWD
-kver=7.3.3-ogc1.1.fc45.x86_64
-test "$(uname -r)" = "$kver"
-test -r "/lib/modules/$kver/build/Module.symvers"
-command -v rpmbuild
-
-build=$(mktemp -d)
-mkdir -p "$build/kbuild" "$build/rpmbuild"
-cp -a "/lib/modules/$kver/build/." "$build/kbuild/"
-
-commit=a66e9e735fa99a7844fe18b0af0651737589f61a
-curl -fL --retry 2 -o "$build/ogc-linux.tar.gz" \
-  "https://codeload.github.com/OpenGamingCollective/linux/tar.gz/$commit"
-tar -xzf "$build/ogc-linux.tar.gz" --strip-components=1 \
-  -C "$build/kbuild" --wildcards '*/drivers/gpu/drm/*'
-
-cd "$build/kbuild"
-patches=("$repo/intel-xe-dsc-rc.patch" "$repo/beyond-fixed-dsc.patch" "$repo/beyond-non-desktop.patch")
-git apply --check "${patches[@]}"
-git apply "${patches[@]}"
-make -j"$(nproc)" M=drivers/gpu/drm/xe modules
-objcopy --strip-debug drivers/gpu/drm/xe/xe.ko "$build/xe.ko"
-
-stock=$(modinfo -n xe)
-test "$(readlink -f "$stock")" = "/usr/lib/modules/$kver/kernel/drivers/gpu/drm/xe/xe.ko"
-for field in vermagic depends; do
-  test "$(modinfo -F "$field" "$build/xe.ko")" = "$(modinfo -F "$field" "$stock")"
-done
-diff -u <(modinfo -F alias "$stock" | sort) <(modinfo -F alias "$build/xe.ko" | sort)
-
-rpmbuild -bb --define "_topdir $build/rpmbuild" \
-  --define "module_path $build/xe.ko" "$repo/packaging/bsb-xe-dsc.spec"
-pkg="$build/rpmbuild/RPMS/x86_64/bsb-xe-dsc-7.3.3-4.fc45.x86_64.rpm"
-rpm -K --nosignature "$pkg"
-printf 'Test RPM: %s\n' "$pkg"
+bash packaging/build-rpms.sh /absolute/path/to/ogc-linux-7.3.3-ogc1.tar.gz
 ```
+
+Download the OGC source archive from the release, or fetch the same source from the OGC commit above. Pass the matching kernel-devel build directory as a second argument if it lives outside `/lib/modules/7.3.3-ogc1.1.fc45.x86_64/build`. The script prints the output directory. Build paths and timestamps can affect build IDs and checksums.
 
 ## Stage and verify the test deployment
 
-Check `rpm-ostree status` before staging. These steps require `jq` and assume there is no other pending deployment. The build produces an unsigned module. Use a trusted module signature if the system enforces signatures. The RPM is tied to the exact kernel package version. [rpm-ostree file overrides and initramfs](https://coreos.github.io/rpm-ostree/administrator-handbook/#override-rpm-files)
+Check `rpm-ostree status` before staging. These steps require Bash, `jq`, `rpm2cpio`, and `cpio`, and assume there is no other pending deployment. The RPM is tied to the exact kernel package version. The module is unsigned. Use a trusted module signature if your system enforces signatures. [rpm-ostree file overrides and initramfs](https://coreos.github.io/rpm-ostree/administrator-handbook/#override-rpm-files)
 
-Keep using the Bash session from the build section so `$pkg`, `$kver` and `$build` are available. For a first install from stock with local initramfs regeneration disabled, run the following.
+Set `pkg` to the absolute path of your chosen RPM. This example uses the combined download. Verify the file against `SHA256SUMS` from the release or your build output. Use the same Bash session for the remaining commands.
+
+```bash
+kver=7.3.3-ogc1.1.fc45.x86_64
+test "$(uname -r)" = "$kver"
+pkg="$HOME/Downloads/bsb-xe-combined-7.3.3-4.fc45.x86_64.rpm"
+sha256sum "$pkg"
+```
+
+For a first install from stock with local initramfs regeneration disabled, run the following.
 
 ```bash
 sudo ostree admin pin booted
@@ -78,7 +64,7 @@ sudo rpm-ostree install --force-replacefiles "$pkg"
 sudo rpm-ostree initramfs --enable --arg=--add-drivers --arg=xe --arg=--nostrip
 ```
 
-If an earlier `bsb-xe-dsc` RPM is already layered, keep the pinned stock deployment and replace the earlier RPM in one transaction. Keep the existing local initramfs settings from the earlier install.
+If a `bsb-xe-dsc` RPM is already layered, keep the pinned stock deployment and switch builds in one transaction. Keep the existing local initramfs settings from the earlier install.
 
 ```bash
 sudo rpm-ostree install --uninstall=bsb-xe-dsc --force-replacefiles "$pkg"
@@ -87,16 +73,25 @@ sudo rpm-ostree install --uninstall=bsb-xe-dsc --force-replacefiles "$pkg"
 Verify the staged module and boot image before rebooting for either a first install or an upgrade.
 
 ```bash
+set -o pipefail
 staged=$(rpm-ostree status --json | jq -er \
   '.deployments[] | select(.staged) | "/sysroot/ostree/deploy/\(.osname)/deploy/\(.checksum).\(.serial)"')
 xe="usr/lib/modules/$kver/kernel/drivers/gpu/drm/xe/xe.ko"
 image="$staged/usr/lib/modules/$kver/initramfs.img"
+module=$(mktemp)
 
-sudo cmp "$build/xe.ko" "$staged/$xe"
-sudo lsinitrd -f "$xe" "$image" | cmp "$build/xe.ko" -
+if rpm2cpio "$pkg" | cpio -i --quiet --to-stdout "./$xe" > "$module" &&
+  test -s "$module" &&
+  sudo cmp "$module" "$staged/$xe" &&
+  sudo lsinitrd -f "$xe" "$image" | cmp "$module" -; then
+  printf 'The staged module and initramfs match the RPM.\n'
+else
+  printf 'Verification failed. Discard the pending deployment before rebooting.\n' >&2
+fi
+rm "$module"
 ```
 
-Reboot with `sudo reboot` once both comparisons pass. On the tested Bazzite build, you can compare the loaded module's build ID with the one on disk. The two IDs should match.
+Reboot with `sudo reboot` once verification passes. On the tested Bazzite build, you can compare the loaded module's build ID with the one on disk. The two IDs should match.
 
 ```bash
 od -An -tx1 -j16 -N20 /sys/module/xe/notes/.note.gnu.build-id | tr -d ' \n'
@@ -106,7 +101,7 @@ readelf -n "$(modinfo -n xe)" | grep 'Build ID:'
 
 ## Check headset detection and automatic DSC
 
-After rebooting into RPM release `4.fc45`, connect the headset and start the VR app. For `BIG:5095`, verify that Lobby can acquire a DRM lease. If `drm_info` is available, check that the headset's DisplayPort connector has `non-desktop=1`.
+After rebooting into the combined RPM, connect the headset and start the VR app. You can also use the relevant check below with its standalone RPM. For `BIG:5095`, verify that Lobby can acquire a DRM lease. If `drm_info` is available, check that the headset's DisplayPort connector has `non-desktop=1`.
 
 For `BIG:1234`, start a 90 Hz scene, check both eyes, and read the Intel display state.
 
@@ -120,7 +115,7 @@ Look for `compressed-bpp:8.0000` in the active 3840×1920, 90 Hz display pipelin
 
 ## Manually enable 8-bpp DSC for the headset
 
-Use these steps with the earlier arithmetic-only RPM or to diagnose a link configuration problem.
+Use these steps with the standalone DSC rate-control RPM or to diagnose a link configuration problem.
 
 Connect and power the headset. The tested Beyond 2e has EDID vendor `BIG`, product `0x1234` (`09 27 34 12` in the command below). The following command lists its connected DisplayPort connector. Use the name it prints in the next block. [Intel link-bpp control](https://github.com/OpenGamingCollective/linux/blob/v7.3.3-ogc1/drivers/gpu/drm/i915/display/intel_link_bw.c)
 
