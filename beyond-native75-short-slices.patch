@@ -1,0 +1,26 @@
+--- a/drivers/gpu/drm/i915/display/intel_dp.c
++++ b/drivers/gpu/drm/i915/display/intel_dp.c
+@@ -1872,6 +1872,23 @@
+ 
+ 	vdsc_cfg->slice_height = intel_dp_get_slice_height(vdsc_cfg->pic_height);
+ 
++	/* Beyond native mode corrupts with the default tall DSC slices.
++	 * Four 1272x12 slices decode correctly and meet the 15000-pixel
++	 * minimum slice area. Keep the standard RC parameter derivation.
++	 */
++	if (connector->base.connector_type == DRM_MODE_CONNECTOR_DisplayPort &&
++	    !connector->mst.dp &&
++	    crtc_state->hw.adjusted_mode.crtc_hdisplay == 5088 &&
++	    vdsc_cfg->pic_height == 2544 &&
++	    intel_dsc_line_slice_count(&crtc_state->dsc.slice_config) == 4) {
++		static const struct drm_edid_ident beyond = {
++			.panel_id = drm_edid_encode_panel_id('B', 'I', 'G', 0x1234),
++		};
++
++		if (drm_edid_match(connector->detect_edid, &beyond))
++			vdsc_cfg->slice_height = 12;
++	}
++
+ 	ret = intel_dsc_compute_params(crtc_state);
+ 	if (ret)
+ 		return ret;
