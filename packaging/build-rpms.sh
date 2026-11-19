@@ -58,8 +58,8 @@ for variant in "${variants[@]}"; do
       patches=(intel-xe-dsc-rc.patch beyond-fixed-dsc.patch beyond-non-desktop.patch)
       ;;
     native75)
-      release=9
-      summary='native 75 Hz short DSC slices plus the three combined fixes'
+      release=11
+      summary='native 75 Hz fixed 48-line DSC slices plus the three combined fixes'
       patches=(intel-xe-dsc-rc.patch beyond-fixed-dsc.patch beyond-non-desktop.patch beyond-native75-short-slices.patch)
       ;;
   esac

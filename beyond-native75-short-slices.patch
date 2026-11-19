@@ -5,7 +5,7 @@
  	vdsc_cfg->slice_height = intel_dp_get_slice_height(vdsc_cfg->pic_height);
  
 +	/* Beyond native mode corrupts with the default tall DSC slices.
-+	 * Four 1272x12 slices decode correctly and meet the 15000-pixel
++	 * Four 1272x48 slices decode correctly and meet the 15000-pixel
 +	 * minimum slice area. Keep the standard RC parameter derivation.
 +	 */
 +	if (connector->base.connector_type == DRM_MODE_CONNECTOR_DisplayPort &&
@@ -18,7 +18,7 @@
 +		};
 +
 +		if (drm_edid_match(connector->detect_edid, &beyond))
-+			vdsc_cfg->slice_height = 12;
++			vdsc_cfg->slice_height = 48;
 +	}
 +
  	ret = intel_dsc_compute_params(crtc_state);

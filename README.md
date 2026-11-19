@@ -9,7 +9,7 @@ On Bazzite 45 (`7.3.3-ogc1.1.fc45.x86_64`), an MSI Claw 8 AI+ with the arithmeti
 
 The automatic DSC patch adds that mode selection to `intel_dp.c`. It matches the Beyond's `BIG:1234` EDID on a single-stream DisplayPort connection and selects 8-bpp DSC during the modeset, subject to the normal link checks.
 
-The native 75 Hz patch, [`beyond-native75-short-slices.patch`](beyond-native75-short-slices.patch), selects 12-line DSC slices for the Beyond's 5088×2544 four-slice mode. Together with the existing fixes, it produces a clear image in both eyes at native 75 Hz while preserving the working 90 Hz mode.
+The native 75 Hz patch, [`beyond-native75-short-slices.patch`](beyond-native75-short-slices.patch), selects 48-line DSC slices for the Beyond's 5088×2544 four-slice mode. Together with the existing fixes, it produces a clear image in both eyes at native 75 Hz while preserving the working 90 Hz mode.
 
 The non-desktop patch marks the Beyond's `BIG:5095` EDID as `non-desktop` when the Intel DisplayPort driver detects it at boot or on reconnect. KDE can then offer the connector for a DRM lease to a VR app such as Lobby. [KDE DRM lease code](https://github.com/KDE/kwin/blob/master/src/wayland/drmlease_v1.cpp#L79-L87)
 
@@ -18,19 +18,19 @@ An earlier Linux 6.16.4-based build (`6.16.4-119.bsb2.fc42.x86_64`) also produce
 ## Native 75 Hz fix found on November 18, 2026
 
 [`beyond-native75-short-slices.patch`](beyond-native75-short-slices.patch) selects
-**four 1272×12 DSC slices** for the `BIG:1234` headset's 5088×2544 mode. The user
+**four 1272×48 DSC slices** for the `BIG:1234` headset's 5088×2544 mode. The user
 confirmed a clear image across both eyes, including the bottom, at 75 Hz on the
-MSI Claw 8 AI+. A dense 8-pixel checkerboard also remained clear after switching
-to 90 Hz and back. The 90 Hz mode remained clear. The separate final `9.fc45`
-build was then installed and verified after reboot:
-75 Hz was fully clear in both eyes with no diagnostic overrides, and 90 Hz
-remained clear. The headset was left displaying the 75 Hz checkerboard.
+MSI Claw 8 AI+, using both normal and dense 8-pixel checkerboards. The 90 Hz
+regression check also passed. These tests establish compatibility for the
+patterns used; they do not establish a visible quality advantage over the
+earlier 12-line configuration.
 
 The patch changes only slice height for this EDID, native resolution, and
 four-slice configuration. Standard Intel rate-control calculations, including
 the existing arithmetic corrections, derive the dependent values. Each slice
-contains 15,264 pixels, exceeding Intel's 15,000-pixel minimum, and 12 divides
-2544 exactly. The final patch has no runtime experiment controls.
+contains 61,056 pixels, exceeding Intel's 15,000-pixel minimum. There are
+53 slice rows because 2544 / 48 = 53. The final patch fixes the height at 48;
+there is no 12-line option or runtime experiment control.
 
 The older 106- and 212-line native slices produced corruption. Changing to the
 legacy DSC 1.1 RC table alone did not fix it; neither did HBR2 or joined pipes.
@@ -40,16 +40,16 @@ not evidence that all Intel DSC outputs require shorter slices.
 
 Apply this patch **after the three original patches**, without the old
 `beyond-native75-test.patch` / eight-slice experiment patches. The `native75`
-build variant packages those four patches as `bsb-xe-dsc 7.3.3-9.fc45`:
+build variant packages those four patches as `bsb-xe-dsc 7.3.3-11.fc45`:
 
 ```sh
 JOBS=6 bash packaging/build-rpms.sh /path/to/ogc-linux-7.3.3-ogc1.tar.gz \
   /lib/modules/7.3.3-ogc1.1.fc45.x86_64/build native75
 ```
 
-The native75 release packages the exact RPM verified on the Claw, alongside
+The native75 release packages the fixed 48-line RPM, alongside
 the four unchanged RPMs from the previous release for comparison. See the
-[release notes](releases/bazzite-45-7.3.3-ogc1.1-native75.md) and
+[release notes](releases/bazzite-45-7.3.3-ogc1.1-native75-48.md) and
 [GitHub releases](https://github.com/ivanaslamov/intel-xe-dsc-fix/releases)
 for availability. Use the staged-module/initramfs verification and rollback
 procedure below. The experiment matrix and exact build receipt are in
@@ -57,7 +57,7 @@ procedure below. The experiment matrix and exact build receipt are in
 
 ## Choose a Bazzite RPM
 
-Choose **native75** (`9.fc45`) for the tested 75 Hz and 90 Hz fix on Bazzite 45 kernel `7.3.3-ogc1.1.fc45.x86_64`. It contains all four patches. The older **combined** RPM (`4.fc45`) contains the three original patches and does not include the native 75 Hz fix. Each standalone RPM applies one patch to the stock Xe module, which lets you test that change independently. All five RPMs replace the same `xe.ko` and use the package name `bsb-xe-dsc`. Install one at a time. Choose by patch name. [Release downloads](https://github.com/ivanaslamov/intel-xe-dsc-fix/releases)
+Choose **native75** (`11.fc45`) for the tested 75 Hz and 90 Hz fix on Bazzite 45 kernel `7.3.3-ogc1.1.fc45.x86_64`. It contains all four patches. The older **combined** RPM (`4.fc45`) contains the three original patches and does not include the native 75 Hz fix. Each standalone RPM applies one patch to the stock Xe module, which lets you test that change independently. All five RPMs replace the same `xe.ko` and use the package name `bsb-xe-dsc`. Install one at a time. Choose by patch name. [Release downloads](https://github.com/ivanaslamov/intel-xe-dsc-fix/releases)
 
 | Standalone RPM | Patch | What it changes |
 | --- | --- | --- |
@@ -90,7 +90,7 @@ Run these commands from the root of this repository on x86_64 Fedora or Bazzite.
 bash packaging/build-rpms.sh /absolute/path/to/ogc-linux-7.3.3-ogc1.tar.gz
 ```
 
-By default this builds the four original variants plus `native75` (`9.fc45`),
+By default this builds the four original variants plus `native75` (`11.fc45`),
 which includes all four patches. To build only the verified 75 Hz variant:
 
 ```sh
@@ -98,7 +98,7 @@ JOBS=6 bash packaging/build-rpms.sh /absolute/path/to/ogc-linux-7.3.3-ogc1.tar.g
   /lib/modules/7.3.3-ogc1.1.fc45.x86_64/build native75
 ```
 
-Use `bsb-xe-native75-7.3.3-9.fc45.x86_64.rpm` from the printed output directory
+Use `bsb-xe-native75-7.3.3-11.fc45.x86_64.rpm` from the printed output directory
 for the 75 Hz fix. The original `combined` (`4.fc45`) variant contains only the
 three older patches.
 
@@ -113,7 +113,7 @@ Set `pkg` to the absolute path of your chosen RPM. This example uses the native7
 ```bash
 kver=7.3.3-ogc1.1.fc45.x86_64
 test "$(uname -r)" = "$kver"
-pkg="$HOME/Downloads/bsb-xe-native75-7.3.3-9.fc45.x86_64.rpm"
+pkg="$HOME/Downloads/bsb-xe-native75-7.3.3-11.fc45.x86_64.rpm"
 sha256sum "$pkg"
 ```
 
@@ -173,7 +173,7 @@ sudo cat /sys/kernel/debug/dri/0000:00:02.0/i915_display_info
 Look for `compressed-bpp:8.0000` in the active 3840×1920, 90 Hz display pipeline whose encoder lists the headset's DisplayPort connector. The Claw's internal `eDP-1` panel can also report 8-bpp DSC. The connector check in the next section identifies the headset's port.
 
 With the native75 RPM, also test 5088×2544 at 75 Hz. Confirm a clear image
-throughout both eyes and four 1272×12 DSC slices at 8 compressed bpp. Switch
+throughout both eyes and four 1272×48 DSC slices at 8 compressed bpp. Switch
 back to 90 Hz to check that mode as well. A successful modeset or a correct
 framebuffer capture alone cannot establish that the headset decodes the image
 correctly; the optical check is necessary.
